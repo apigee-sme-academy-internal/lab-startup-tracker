@@ -4,16 +4,11 @@ const _progress = require('cli-progress');
 const { format:formatDate, addSeconds } = require('date-fns');
 const fs = require('fs').promises;
 const path = require('path');
-const os = require('os');
-
-const TASKS_DIR = path.join(os.tmpdir(), 'lab-tasks');
-
-
+const {init} = require('./utils');
 
 function sleep(time) {
     return new Promise((resolve) => setTimeout(resolve, time));
 }
-
 
 // create new container
 const multibar = new _progress.MultiBar({
@@ -27,6 +22,24 @@ const multibar = new _progress.MultiBar({
     synchronousUpdate: true
 });
 
+
+function exitHandler(options, exitCode) {
+    multibar.stop();
+    if (options.exit) process.exit(exitCode);
+}
+
+//do something when app is closing
+process.on('exit', exitHandler.bind(null,{cleanup:true}));
+
+//catches ctrl+c event
+process.on('SIGINT', exitHandler.bind(null, {exit:true}));
+
+// catches "kill pid" (for example: nodemon restart)
+process.on('SIGUSR1', exitHandler.bind(null, {exit:true}));
+process.on('SIGUSR2', exitHandler.bind(null, {exit:true}));
+
+//catches uncaught exceptions
+process.on('uncaughtException', exitHandler.bind(null, {exit:true}));
 
 
 function mktime(start, end) {
@@ -66,15 +79,19 @@ function parseLine(txt) {
     ];
 }
 
-async function get_task_info(task_id) {
+async function get_task_info(task_id, strict = false) {
+
+    const TASKS_DIR = await init();
 
     try {
         let file_path = path.join(TASKS_DIR,task_id);
         try {
             await fs.access(file_path);
         } catch (ex) {
+            if (strict) return null;
             return {
                 name: task_id,
+                start: "0",
                 display: mkname(task_id),
                 state: mkstate('unknown'),
                 time: mktime(""),
@@ -108,6 +125,7 @@ async function get_task_info(task_id) {
     } catch (ex) {
         return {
             name: task_id,
+            start: "0",
             display: mkname(task_id),
             state: mkstate('error'),
             time: mktime(""),
@@ -116,7 +134,23 @@ async function get_task_info(task_id) {
     }
 }
 
-async function main() {
+async function monitor(task_list) {
+    const TASKS_DIR = await init();
+
+    async function get_task_ids(){
+        if (!task_list) return await fs.readdir(TASKS_DIR);
+        return task_list.split(",");
+    }
+
+    let empty = multibar.create(100, 0, );
+    empty.update(0,{
+        name: " ",
+        display: " ",
+        state: " ",
+        time: " ",
+        message: ""
+    });
+
     let title = multibar.create(100, 0, );
     title.update(0,{
         name: "tasks",
@@ -128,29 +162,41 @@ async function main() {
 
     let tasks = {};
 
-
     while(true) {
-        let files = await fs.readdir(TASKS_DIR)
+        let files = await get_task_ids();
         for (let file of files) {
             let task_id = file;
             if (tasks[task_id]) continue;
 
             tasks[task_id] = {};
-            let bar = multibar.create(100, 0, );
-            tasks[task_id].bar = bar;
+            tasks[task_id].id = task_id;
+            tasks[task_id].info = await get_task_info(task_id);
         }
 
-        for(let task_id in tasks) {
-            let task = tasks[task_id];
+        let task_array = Object.values(tasks);
+        task_array.sort(function(a,b) {
+            return parseInt(a.info.start) - parseInt(b.info.start);
+        })
+
+        for(let task of task_array) {
+            task.info = await get_task_info(task.id, !task_list);
+            if (!task.info && task.bar) {
+                multibar.remove(task.bar);
+                continue;
+            }
+
+            if (!task.bar) {
+                task.bar = multibar.create(100, 0, );
+            }
+
             let bar = task.bar;
-            let task_info = await get_task_info(task_id);
             bar.update(0,{
-                display: task_info.display,
-                state: task_info.state,
-                time: task_info.time,
-                start: task_info.start,
-                end: task_info.end,
-                message: task_info.message
+                display: task.info.display,
+                state: task.info.state,
+                time: task.info.time,
+                start: task.info.start,
+                end: task.info.end,
+                message: task.info.message
             });
         }
         await sleep(3);
@@ -158,4 +204,5 @@ async function main() {
 
 }
 
-module.exports = main;
+
+module.exports = monitor;

@@ -10,11 +10,18 @@ const yargs = require('yargs');
  */
 var argv = yargs
     .command(
-        'monitor',
+        'monitor [task_list]',
         'Monitor tasks',
-        function (yargs) {},
+        function (yargs) {
+            return yargs
+                .positional('task_list', {
+                    describe: 'List of task IDs (t1,t2,etc)',
+                    type: 'string',
+                    required: false
+                });
+        },
         async function (argv) {
-            await monitor();
+            await monitor(argv["task_list"]);
         }
     )
     .command(
@@ -52,7 +59,6 @@ var argv = yargs
                 })
         },
         async function (argv) {
-            console.log(argv);
             return handler.update(argv['id'], argv['state']);
         }
     )
