@@ -5,6 +5,8 @@ const { format:formatDate, addSeconds } = require('date-fns');
 const fs = require('fs').promises;
 const path = require('path');
 const {init} = require('./utils');
+const _colors = require('colors');
+
 
 function sleep(time) {
     return new Promise((resolve) => setTimeout(resolve, time));
@@ -12,7 +14,7 @@ function sleep(time) {
 
 // create new container
 const multibar = new _progress.MultiBar({
-    format: ' {display} {time} {state} {message}',
+    format: `  ${_colors.grey('{bar}')} │ {time} │ {state} │ {display} {message}` ,
     forceRedraw: true,
     hideCursor: true,
     barCompleteChar: '\u2588',
@@ -43,30 +45,62 @@ process.on('uncaughtException', exitHandler.bind(null, {exit:true}));
 
 
 function mktime(start, end) {
-    if (!start) return "[00:00]";
+    if (!start) return "00:00";
     if (start && end) {
         let seconds = parseInt(end) - parseInt(start);
         var helperDate = addSeconds(new Date(0), seconds);
-        return `[${formatDate(helperDate, 'mm:ss')}]`;
+        return `${formatDate(helperDate, 'mm:ss')}`;
     }
 
     end =  new String(Date.now() / 1000);
     let seconds = parseInt(end) - parseInt(start);
     var helperDate = addSeconds(new Date(0), seconds);
-    return `[${formatDate(helperDate, 'mm:ss')}]`;
+    let time = formatDate(helperDate, 'mm:ss');
+    return `${time}`;
 }
+
+function mkpercent(start, end, eta) {
+    if (!start) return 0;
+    if (end) return 100;
+    if (!eta) return 0;
+
+    let last = new String(Date.now() / 1000);
+    let seconds = parseInt(last) - parseInt(start);
+    eta = parseInt(eta);
+
+    let max_percent = 98;
+    if (seconds > eta) {
+        return max_percent;
+    }
+
+    let percent = (seconds/eta * 100) | 0;
+    percent = Math.max(1,percent); //never put 0% completion
+    return Math.min(percent,max_percent); //never put 100% completion
+}
+
 
 function mkmsg(msg) {
     if (!msg) return "";
     return `${msg}`;
 }
 
-function mkname(name) {
-    return `${name} `.padEnd(50, '.');
+function mkdisplay(name) {
+    return `${name}`;
 }
 
 function mkstate(state) {
-    return `${state} `.padEnd(15, ' ');
+    let len = state.length;
+    let fill = 9;
+    let start = ((fill - len)/2) | 0;
+    let end = fill - len - start;
+    return "".padEnd(start, ' ') + `${state}` + "".padEnd(end, " ");
+}
+
+function centerPad(text, fill, char) {
+    let len = text.length;
+    let start = ((fill - len)/2) | 0;
+    let end = fill - len - start;
+    return "".padEnd(start, char) + `${text}` + "".padEnd(end, char);
 }
 
 function parseLine(txt) {
@@ -76,6 +110,7 @@ function parseLine(txt) {
     return [
         (parts[0] || "").replace(/^\s+|\s+$/g, ''),
         (parts[1] || "").replace(/^\s+|\s+$/g, ''),
+        (parts[2] || "").replace(/^\s+|\s+$/g, ''),
     ];
 }
 
@@ -92,7 +127,9 @@ async function get_task_info(task_id, strict = false) {
             return {
                 name: task_id,
                 start: "0",
-                display: mkname(task_id),
+                eta: "60",
+                percent: "0",
+                display: mkdisplay(task_id),
                 state: mkstate('unknown'),
                 time: mktime(""),
                 message: mkmsg("")
@@ -102,22 +139,24 @@ async function get_task_info(task_id, strict = false) {
         text = text.replace(/^\s+|\s+$/g, '');
         let lines = text.split("\n");
 
-        let [task_first_state, task_first_time] = parseLine(lines[0]);
+        let [task_first_state, task_first_time, eta] = parseLine(lines[0]);
         let [task_last_state, task_last_time] = parseLine(lines[lines.length-1]);
 
+        let completion_time = "";
         if (task_last_state.startsWith("-")) {
             task_last_state = task_last_state.substring(1);
-        } else {
-            task_last_time = null;
+            completion_time = task_last_time;
         }
 
         let task_info = {
             start: task_first_time,
-            end: task_last_time,
+            eta: eta,
+            percent: mkpercent(task_first_time, completion_time, eta),
+            end: completion_time,
             name: task_first_state,
-            display: mkname(task_first_state || task_id),
+            display: mkdisplay(task_first_state || task_id),
             state: mkstate(task_last_state),
-            time: mktime(task_first_time, task_last_time),
+            time: mktime(task_first_time, completion_time),
             message: mkmsg("")
         };
 
@@ -126,7 +165,9 @@ async function get_task_info(task_id, strict = false) {
         return {
             name: task_id,
             start: "0",
-            display: mkname(task_id),
+            eta: "60",
+            percent: "0",
+            display: mkdisplay(task_id),
             state: mkstate('error'),
             time: mktime(""),
             message: mkmsg(ex.message)
@@ -135,30 +176,24 @@ async function get_task_info(task_id, strict = false) {
 }
 
 async function monitor(task_list) {
+    let fill = 80;
+    let message = _colors.bold("- Lab Startup Tasks -");
+    console.log("\n" + centerPad(message, fill,  ' ') + "\n");
+
+    console.log(
+        " " + centerPad(_colors.underline("Progress"), 50, ' ') +
+        "   " + _colors.underline("Time") + "  "  +
+        "    " + _colors.underline("State") +
+        "    " + _colors.underline("Task"));
+    console.log("");
+
+
     const TASKS_DIR = await init();
 
     async function get_task_ids(){
         if (!task_list) return await fs.readdir(TASKS_DIR);
         return task_list.split(",");
     }
-
-    let empty = multibar.create(100, 0, );
-    empty.update(0,{
-        name: " ",
-        display: " ",
-        state: " ",
-        time: " ",
-        message: ""
-    });
-
-    let title = multibar.create(100, 0, );
-    title.update(0,{
-        name: "tasks",
-        display: mkname("Task"),
-        state: mkstate('State'),
-        time: "Time   ",
-        message: ""
-    });
 
     let tasks = {};
 
@@ -190,14 +225,7 @@ async function monitor(task_list) {
             }
 
             let bar = task.bar;
-            bar.update(0,{
-                display: task.info.display,
-                state: task.info.state,
-                time: task.info.time,
-                start: task.info.start,
-                end: task.info.end,
-                message: task.info.message
-            });
+            bar.update(task.info.percent, task.info);
         }
         await sleep(3);
     }

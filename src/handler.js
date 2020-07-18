@@ -4,14 +4,14 @@ const path = require('path');
 const {init} = require('./utils');
 
 
-async function begin(id, name) {
+async function begin(id, name, eta) {
     if (!id) throw new Error('task id required');
 
     const TASKS_DIR = await init();
     let task_file = path.join(TASKS_DIR,id);
     let fh = await fs.open(task_file, 'w');
     try {
-        await fh.write(`${name || id}|${~~(Date.now() / 1000)}\n`);
+        await fh.write(`${name || id}|${~~(Date.now() / 1000)}|${eta}\n`);
     } finally {
         await fh.close(fh);
     }

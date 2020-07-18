@@ -17,7 +17,7 @@ async function init() {
         await fs.mkdir(path, {recursive: true, mode: 0o777});
         return TASKS_DIR;
     } finally {
-        //resotre umask
+        //restore umask
         process.umask(umask);
     }
 }
