@@ -33,7 +33,7 @@ async function update(id, state) {
     }
 }
 
-async function end(id) {
+async function end(id, state) {
     if (!id) throw new Error('task id required');
 
     const TASKS_DIR = await init();
@@ -41,7 +41,22 @@ async function end(id) {
     let task_file = path.join(TASKS_DIR,id);
     let fh = await fs.open(task_file, 'a+');
     try {
-        await fh.write(`-completed|${~~(Date.now() / 1000)}\n`);
+        await fh.write(`-${state}|${~~(Date.now() / 1000)}\n`);
+    } finally {
+        await fh.close(fh);
+    }
+}
+
+
+async function fail(id, state) {
+    if (!id) throw new Error('task id required');
+
+    const TASKS_DIR = await init();
+
+    let task_file = path.join(TASKS_DIR,id);
+    let fh = await fs.open(task_file, 'a+');
+    try {
+        await fh.write(`!${state}|${~~(Date.now() / 1000)}\n`);
     } finally {
         await fh.close(fh);
     }
@@ -77,3 +92,4 @@ module.exports.update = update;
 module.exports.end = end;
 module.exports.del = del;
 module.exports.list = list;
+module.exports.fail = fail;

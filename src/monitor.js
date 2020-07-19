@@ -44,10 +44,16 @@ process.on('SIGUSR2', exitHandler.bind(null, {exit:true}));
 process.on('uncaughtException', exitHandler.bind(null, {exit:true}));
 
 
-function mktime(start, end) {
+function mktime(start, end, fail) {
     if (!start) return "00:00";
     if (start && end) {
         let seconds = parseInt(end) - parseInt(start);
+        var helperDate = addSeconds(new Date(0), seconds);
+        return `${formatDate(helperDate, 'mm:ss')}`;
+    }
+
+    if (start && fail) {
+        let seconds = parseInt(fail) - parseInt(start);
         var helperDate = addSeconds(new Date(0), seconds);
         return `${formatDate(helperDate, 'mm:ss')}`;
     }
@@ -59,12 +65,16 @@ function mktime(start, end) {
     return `${time}`;
 }
 
-function mkpercent(start, end, eta) {
+function mkpercent(start, end, fail, eta) {
     if (!start) return 0;
     if (end) return 100;
     if (!eta) return 0;
 
     let last = new String(Date.now() / 1000);
+    if (fail) {
+        last = parseInt(fail);
+    }
+
     let seconds = parseInt(last) - parseInt(start);
     eta = parseInt(eta);
 
@@ -148,15 +158,21 @@ async function get_task_info(task_id, strict = false) {
             completion_time = task_last_time;
         }
 
+        let failure_time = "";
+        if (task_last_state.startsWith("!")) {
+            task_last_state = task_last_state.substring(1);
+            failure_time = task_last_time;
+        }
+
         let task_info = {
             start: task_first_time,
             eta: eta,
-            percent: mkpercent(task_first_time, completion_time, eta),
+            percent: mkpercent(task_first_time, completion_time, failure_time, eta),
             end: completion_time,
             name: task_first_state,
             display: mkdisplay(task_first_state || task_id),
             state: mkstate(task_last_state),
-            time: mktime(task_first_time, completion_time),
+            time: mktime(task_first_time, completion_time, failure_time),
             message: mkmsg("")
         };
 
@@ -176,6 +192,8 @@ async function get_task_info(task_id, strict = false) {
 }
 
 async function monitor(task_list) {
+    const TASKS_DIR = await init();
+
     let fill = 80;
     let message = _colors.bold("- Lab Startup Tasks -");
     console.log("\n" + centerPad(message, fill,  ' ') + "\n");
@@ -188,7 +206,8 @@ async function monitor(task_list) {
     console.log("");
 
 
-    const TASKS_DIR = await init();
+
+
 
     async function get_task_ids(){
         if (!task_list) return await fs.readdir(TASKS_DIR);
